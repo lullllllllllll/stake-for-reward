@@ -1,0 +1,168 @@
+// SPDX-License-Identifier: MIT
+
+import "StakeMain.sol";
+import "StakeToken.sol";
+
+pragma solidity >=0.8.10 <0.9.0;
+
+contract StakeGate {
+    mapping(address => bool) private Owners;
+
+    address public StakeTestNetContract;
+    address public StakeTestNetTokenContract;
+    bytes32 public StakeTestABI;
+
+    address public StakeDevNetContract;
+    address public StakeDevNetTokenContract;
+    bytes32 public StakeDevABI;
+
+    address public StakeProdNetContract;
+    address public StakeProdNetTokenContract;
+    bytes32 public StakeABI;
+
+
+    constructor(address TestNetContract,address TestNetTokenContract,address DevNetContract,address DevNetTokenContract,address ProdNetContract,address ProdNetTokenContract) {
+        Owners[msg.sender] = true;
+
+        StakeTestNetContract=TestNetContract;
+        StakeTestNetTokenContract=TestNetTokenContract;
+        
+        StakeDevNetContract=DevNetContract;
+        StakeDevNetTokenContract=DevNetTokenContract;
+
+        StakeProdNetContract=ProdNetContract;
+        StakeProdNetTokenContract=ProdNetTokenContract;
+
+
+        // StakeToken wmqt_test=new StakeToken("StakeToken","WMQT",10000000000000000000,9);
+        // StakeTestNetTokenContract=address(wmqt_test);
+        // Token: 0xFC737F241Ad12CA884C70CA805E72515DFA060ed
+        // Stake wmq_test=new Stake("TestNet",StakeTestNetContract,StakeTestNetContract);
+        // StakeTestNetContract=address(wmq_test);
+        // Main Contract: 0x1da9AE70D6DEE924Ab3Dd63e3608d47864536484
+
+        // StakeToken wmqt_dev=new StakeToken("StakeToken","WMQD",10000000000000000000,9);
+        // StakeDevNetTokenContract=address(wmqt_dev);
+        // Token: 0x2f5Feb1231A0101C4E1EebD087771F36Ff585a98
+        // Stake wmq_dev=new Stake("DevNet",StakeDevNetContract,StakeDevNetContract);
+        // StakeDevNetContract=address(wmq_dev);
+        // Main Contract: 0x25734477Fe61040Ef38d55932FE6356DED0dc9b7
+
+        // StakeToken wmqt_prod=new StakeToken("StakeToken","WMQ",10000000000000000000,9);
+        // StakeProdNetTokenContract=address(wmqt_prod);
+        // Token: 0xd3580eB89EFd90E2e75739CC5236420a77341C27
+        // Stake wmq_prod=new Stake("Prod",StakeProdNetContract,StakeProdNetContract);
+        // StakeProdNetTokenContract=address(wmq_prod);
+        // Main Contract: 0x9896cA6065D59ae2E320b696C927F7A9438382B0
+
+
+        // Gate: 0x1d43E36c5125F19D6D58b7384048e86daC61046F
+
+    }
+
+    modifier OnlyOwner() {
+        require(
+            Owners[msg.sender] == true,
+            "You are not the Owner of this contract"
+        );
+        _;
+    }
+
+    function changeOwner(address newOwner) public OnlyOwner returns (bool) {
+        require(
+            Owners[newOwner] == false,
+            "This address is one of owners already"
+        );
+        Owners[newOwner] = true;
+        delete Owners[msg.sender];
+        return true;
+    }
+
+    function addOwner(address newOwner) public OnlyOwner returns (bool) {
+        require(
+            Owners[newOwner] == false,
+            "This address is one of owners already"
+        );
+        Owners[newOwner] = true;
+        return true;
+    }
+
+    function removeOwner(address newOwner) public OnlyOwner returns (bool) {
+        require(Owners[newOwner] == true, "This address is not one of owners");
+        require(newOwner != msg.sender, "You cannot remove yourself");
+        delete Owners[newOwner];
+        return true;
+    }
+
+    function changeStakeTestNetContract(address newStakeTestNetContract)
+        public
+        OnlyOwner
+        returns (bool)
+    {
+        StakeTestNetContract = newStakeTestNetContract;
+        return true;
+    }
+
+    function changeStakeDevNetContract(address newStakeDevNetContract)
+        public
+        OnlyOwner
+        returns (bool)
+    {
+        StakeDevNetContract = newStakeDevNetContract;
+        return true;
+    }
+
+    function changeStakeProdNetContract(address newStakeProdNetContract)
+        public
+        OnlyOwner
+        returns (bool)
+    {
+        StakeProdNetContract = newStakeProdNetContract;
+        return true;
+    }
+
+    function changeStakeTestTokenNetContract(
+        address newStakeTestNetTokenContract
+    ) public OnlyOwner returns (bool) {
+        StakeTestNetTokenContract = newStakeTestNetTokenContract;
+        return true;
+    }
+
+    function changeStakeDevNetTokenContract(
+        address newStakeDevNetTokenContract
+    ) public OnlyOwner returns (bool) {
+        StakeDevNetTokenContract = newStakeDevNetTokenContract;
+        return true;
+    }
+
+    function changeStakeProdNetTokenContract(
+        address newStakeProdNetTokenContract
+    ) public OnlyOwner returns (bool) {
+        StakeProdNetTokenContract = newStakeProdNetTokenContract;
+        return true;
+    }
+
+    // function changeStakeABI(string memory newStakeABI)
+    //     public
+    //     OnlyOwner
+    //     returns (bool)
+    // {
+    //     StakeABI = stringToBytes32(newStakeABI);
+    //     return true;
+    // }
+
+    function stringToBytes32(string memory source)
+        private
+        pure
+        returns (bytes32 result)
+    {
+        bytes memory tempEmptyStringTest = bytes(source);
+        if (tempEmptyStringTest.length == 0) {
+            return 0x0;
+        }
+
+        assembly {
+            result := mload(add(source, 32))
+        }
+    }
+}
