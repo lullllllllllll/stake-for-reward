@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: MIT
+
+pragma solidity >=0.8.10 <0.9.0;
+
+contract StakeContractAdmin {
+    mapping(address => bool) public ContractOwners;
+
+    function ChangeContractOwner(address NewContractOwner)
+        public
+        OnlyOwner
+        returns (bool)
+    {
+        ContractOwners[NewContractOwner] = true;
+        delete ContractOwners[msg.sender];
+        return true;
+    }
+
+    function AddContractOwner(address NewContractOwner)
+        public
+        OnlyOwner
+        returns (bool)
+    {
+        ContractOwners[NewContractOwner] = true;
+        return true;
+    }
+
+    function RemoveContractOwner(address NewContractOwner)
+        public
+        OnlyOwner
+        returns (bool)
+    {
+        delete ContractOwners[NewContractOwner];
+        return true;
+    }
+
+    modifier OnlyOwner() {
+        require(
+            ContractOwners[msg.sender] == true,
+            "you are not the owner of this contract"
+        );
+        _;
+    }
+}
