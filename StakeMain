@@ -1,0 +1,507 @@
+// SPDX-License-Identifier: MIT
+
+pragma solidity >=0.8.10 <0.9.0;
+import "StakeContractAdmin.sol";
+import "IERC20.sol";
+
+// import "@openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
+
+contract Stake is StakeContractAdmin {
+    uint32 public cyclesId;
+    uint256 public STAKENUM = 200;
+    uint256 public MIN_Recharge = 5;
+    IERC20 stakeToken;
+    address public stakeTokenAddr;
+    IERC20 rewardToken;
+    address public rewardTokenAddr;
+
+    string public CurrentMissionID;
+
+    string public OfficalNodeID;
+    string public OfficalNodeURI;
+    string public OfficalNodeAddress;
+
+    enum StakeNodeType {
+        OTHER,
+        WORKER,
+        METADATASTORAGE,
+        VALIDATOR
+    }
+
+    struct Fee {
+        address receiver;
+        uint256 value;
+        uint32 feeType;
+    }
+
+    struct NodeStakeRecord {
+        uint256 stakedAmount;
+        address Owner;
+        uint256 stakedAt;
+        bool isStaked;
+    }
+
+    struct SettlementEvent {
+        bytes signatures;
+        bytes32 txHash;
+    }
+
+    string[] public StakeNodeWorkers;
+    string[] public StakeMetadataStorageNodes;
+    string[] public StakeNodeValidators;
+    string[] public StakeOtherNodes;
+
+    // address => nodeid => NodeStakeRecord
+    mapping(address => mapping(string => NodeStakeRecord)) StakeRecord;
+    mapping(address => bool) public StakedAddress;
+
+    // nodeid => NodeStakeRecord
+    mapping(string => NodeStakeRecord) public StakedValidators;
+    mapping(address => string[]) public usersStakedValidatorsMap;
+
+    // nodeid => NodeStakeRecord
+    mapping(string => NodeStakeRecord) public StakedMetastorageNodes;
+    mapping(address => string[]) public usersStakedMetastorageNodesMap;
+
+    // nodeid => NodeStakeRecord
+    mapping(string => NodeStakeRecord) public StakedWorkers;
+    mapping(address => string[]) public usersStakedWorkersMap;
+
+    // mapping(address => StakeNode) private StakeStakeID;
+
+    mapping(string => string) public nodeIdPub;
+    mapping(string => address) public pubkeyToWallet; // test mod
+    mapping(address => uint256) public Rewards;
+    mapping(address => uint256) public stakedValues;
+    mapping(address => uint256) public rechargedValues;
+    mapping(address => uint256) private withdrawdReward;
+    mapping(string => SettlementEvent) public SettlementMap;
+
+    // missionID => Node ID list
+    mapping(string => string[]) private verificationMissionNodeIdMap;
+
+    event StakeEvent(
+        address indexed from,
+        uint256 value,
+        StakeNodeType nodeType
+    );
+
+    event RechargeEvent(address indexed from, uint256 value);
+    event RechargeByOwnerEvent(
+        address indexed operator,
+        address indexed target_user,
+        uint256 value
+    );
+
+    event WithdrawEven(address indexed from, uint256 value); //withdraw even
+    event Settlement(address indexed from, string missionsId);
+
+    constructor(
+
+        address _stakeTokenAddr,
+        address _rewardTokenAddr
+    ) {
+        stakeToken = IERC20(_stakeTokenAddr);
+        stakeTokenAddr = _stakeTokenAddr;
+        rewardToken = IERC20(_rewardTokenAddr);
+        rewardTokenAddr = _rewardTokenAddr;
+        ContractOwners[msg.sender] = true;
+
+        STAKENUM = STAKENUM * 10**stakeToken.decimals();
+        MIN_Recharge = MIN_Recharge * 10**stakeToken.decimals();
+    }
+
+
+    function setStakeNum(uint256 newStakeNum) public OnlyOwner returns (bool) {
+        STAKENUM = newStakeNum * 10**stakeToken.decimals();
+        return true;
+    }
+
+    function setRechargeMinNum(uint256 newRechargeMinNum)
+        public
+        OnlyOwner
+        returns (bool)
+    {
+        MIN_Recharge = newRechargeMinNum * 10**stakeToken.decimals();
+        return true;
+    }
+
+    function setOfficalNodeInfo(
+        string memory officalNodeID,
+        string memory officalNodeURI,
+        string memory officalNodeAddress
+    ) public OnlyOwner returns (bool) {
+        OfficalNodeID = officalNodeID;
+        OfficalNodeURI = officalNodeURI;
+        OfficalNodeAddress = officalNodeAddress;
+        return true;
+    }
+
+    function recharge(uint256 _amount) public payable {
+        uint256 user_amount = rewardToken.balanceOf(msg.sender);
+        require(
+            user_amount > MIN_Recharge && _amount >= MIN_Recharge,
+            "User assets must be greater than MIN_Recharge"
+        );
+        rewardToken.transferFrom(msg.sender, address(this), _amount);
+        rechargedValues[msg.sender] += _amount;
+        emit RechargeEvent(msg.sender, _amount);
+    }
+
+    function rechargeByOwner(address target_user, uint256 _amount)
+        public
+        payable
+    {
+        require(
+            _amount >= MIN_Recharge,
+            "amount must be greater than MIN_Recharge"
+        );
+
+        // rewardToken.transferFrom(msg.sender, address(this), _amount);
+
+        rechargedValues[target_user] += _amount;
+        emit RechargeByOwnerEvent(msg.sender, target_user, _amount);
+    }
+
+    function stake(
+        string memory nodePubkey,
+        string memory nodeID,
+        StakeNodeType node_type,
+        uint256 _amount
+    ) public payable CheckNodeStakeStatus(nodeID, node_type) {
+        // TODO verify node's signature by nodePubkey
+        NodeStakeRecord memory _NodeStakeRecord;
+        _NodeStakeRecord.Owner = msg.sender;
+        _NodeStakeRecord.stakedAt = block.timestamp;
+        _NodeStakeRecord.isStaked = true;
+
+        if (node_type == StakeNodeType.OTHER) {
+            // _NodeStakeRecord.stakedAmount = 0;
+            // _NodeStakeRecord.isStaked = false;
+            StakeOtherNodes.push(nodeID);
+        }
+        if (node_type == StakeNodeType.WORKER) {
+            if (StakedWorkers[nodeID].stakedAt == 0) {
+                StakeNodeWorkers.push(nodeID);
+            }
+            _NodeStakeRecord.stakedAmount = 0;
+
+            StakedWorkers[nodeID] = _NodeStakeRecord;
+            usersStakedWorkersMap[msg.sender].push(nodeID);
+        } else if (node_type == StakeNodeType.VALIDATOR) {
+            _NodeStakeRecord.stakedAmount = _amount;
+            StakedValidators[nodeID] = _NodeStakeRecord;
+            usersStakedValidatorsMap[msg.sender].push(nodeID);
+            StakeNodeValidators.push(nodeID);
+        } else if (node_type == StakeNodeType.METADATASTORAGE) {
+            _NodeStakeRecord.stakedAmount = _amount;
+            StakedMetastorageNodes[nodeID] = _NodeStakeRecord;
+            usersStakedMetastorageNodesMap[msg.sender].push(nodeID);
+            StakeMetadataStorageNodes.push(nodeID);
+        }
+
+        nodeIdPub[nodeID] = nodePubkey;
+        pubkeyToWallet[nodePubkey] = msg.sender;
+        StakedAddress[msg.sender] = true;
+
+        if (
+            node_type == StakeNodeType.VALIDATOR ||
+            node_type == StakeNodeType.METADATASTORAGE
+        ) {
+            uint256 user_amount = stakeToken.balanceOf(msg.sender);
+            require(
+                user_amount > STAKENUM && _amount >= STAKENUM,
+                "User assets must be greater than STAKENUM"
+            );
+            stakeToken.transferFrom(msg.sender, address(this), _amount);
+            stakedValues[msg.sender] += _amount;
+        }
+
+        emit StakeEvent(msg.sender, _amount, node_type);
+    }
+
+    function isStakedAddress(address wallet) public view returns (bool) {
+        if (stakedValues[wallet] >= STAKENUM) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    function ChangeStakeTokenContract(address newTokenContract)
+        public
+        OnlyOwner
+        returns (bool)
+    {
+        stakeToken = IERC20(newTokenContract);
+        stakeTokenAddr = newTokenContract;
+        STAKENUM = STAKENUM * 10**stakeToken.decimals();
+        return true;
+    }
+
+    function ChangeRewardTokenContract(address newTokenContract)
+        public
+        OnlyOwner
+        returns (bool)
+    {
+        rewardToken = IERC20(newTokenContract);
+        rewardTokenAddr = newTokenContract;
+        return true;
+    }
+
+    modifier CheckNodeStakeStatus(
+        string memory NodeID,
+        StakeNodeType sNodeType
+    ) {
+        if (sNodeType == StakeNodeType.WORKER) {
+            require(
+                !StakedWorkers[NodeID].isStaked,
+                "this node has staked as Worker already, you can't staked twice."
+            );
+        }
+        if (sNodeType == StakeNodeType.VALIDATOR) {
+            require(
+                !StakedValidators[NodeID].isStaked,
+                "this node has staked as Validator already, you can't staked twice."
+            );
+        }
+        if (sNodeType == StakeNodeType.METADATASTORAGE) {
+            require(
+                !StakedMetastorageNodes[NodeID].isStaked,
+                "this node has staked as MetadataStorager already, you can't staked twice."
+            );
+        }
+        _;
+    }
+
+    function settlement(
+        string memory nodeid,
+        bytes memory data,
+        bytes memory signatures,
+        string memory missionsId
+    ) public virtual {
+        require(
+            StakedValidators[nodeid].isStaked == true,
+            "sender should in Validator list"
+        );
+
+        bytes32 txHash = encodeTransactionData(
+            address(this),
+            data,
+            cyclesId,
+            block.chainid
+        );
+
+        // uint256 _threshold = (StakeNodeValidators.length / 2) + 1;
+
+        // checkSignatures(nodeid, txHash, signatures, _threshold);
+
+        Fee[] memory FeeArr = abi.decode(data, (Fee[]));
+
+        SettlementEvent memory settlementevent;
+
+        for (uint256 i = 0; i < FeeArr.length; i++) {
+            require(
+                StakedAddress[FeeArr[i].receiver] == true,
+                "receiver must a staked address"
+            );
+            uint256 banlance = Rewards[FeeArr[i].receiver];
+            if (FeeArr[i].feeType == 0) {
+                Rewards[FeeArr[i].receiver] = banlance + (FeeArr[i].value);
+            } else if (FeeArr[i].feeType == 1) {
+                require(
+                    banlance > FeeArr[i].value,
+                    "fee value must be positive sheares"
+                );
+                Rewards[FeeArr[i].receiver] = banlance - (FeeArr[i].value);
+            }
+        }
+        cyclesId++;
+
+        settlementevent.signatures = signatures;
+        settlementevent.txHash = txHash;
+        SettlementMap[missionsId] = settlementevent;
+        CurrentMissionID = missionsId;
+        emit Settlement(msg.sender, missionsId);
+    }
+
+    function withdrawReward(uint256 _amount) public {
+        require(
+            Rewards[msg.sender] >= _amount,
+            "user's banlance of rewards is not enough"
+        );
+        withdrawdReward[msg.sender] += _amount;
+        rewardToken.transferFrom(address(this), msg.sender, _amount);
+        emit WithdrawEven(msg.sender, _amount);
+    }
+
+    function withdrawStake(uint256 _amount) public {
+        require(
+            stakedValues[msg.sender] >= _amount,
+            "user's banlance of stake is not enough"
+        );
+
+        stakeToken.transferFrom(address(this), msg.sender, _amount);
+        emit WithdrawEven(msg.sender, _amount);
+    }
+
+    function cancelMyStake() public {
+        removeStakedNodesByUserID(msg.sender);
+        withdrawStake(stakedValues[msg.sender]);
+    }
+
+    function withdrawRecharge(uint256 _amount) private {
+        require(
+            rechargedValues[msg.sender] >= _amount,
+            "user's banlance is not enough"
+        );
+        rewardToken.transferFrom(address(this), msg.sender, _amount);
+        rechargedValues[msg.sender] -= _amount;
+        emit WithdrawEven(msg.sender, _amount);
+    }
+
+    // utils function
+    function checkSignatures(
+        string memory nodeid,
+        bytes32 dataHash,
+        bytes memory signatures,
+        uint256 _threshold
+    ) public view {
+        require(_threshold > 0, "_threshold is bark");
+
+        require(signatures.length >= _threshold * 65, "signatures is woring");
+
+        address currentOwner;
+        uint256 i;
+        for (i = 0; i < _threshold; i++) {
+            currentOwner = recoverKey(dataHash, signatures, i);
+            require(StakedValidators[nodeid].isStaked, "address is error");
+        }
+    }
+
+    function encodeTransactionData(
+        address to,
+        bytes memory data,
+        uint256 _nonce,
+        uint256 chianId
+    ) public pure returns (bytes32) {
+        return
+            keccak256(abi.encodePacked(to, keccak256(data), _nonce, chianId));
+    }
+
+    function getNodesByOwnerWallet(address Owner, StakeNodeType nodeType)
+        public
+        view
+        returns (string[] memory nodes)
+    {
+        if (nodeType == StakeNodeType.WORKER) {
+            return usersStakedWorkersMap[Owner];
+        } else if (nodeType == StakeNodeType.METADATASTORAGE) {
+            return usersStakedMetastorageNodesMap[Owner];
+        } else if (nodeType == StakeNodeType.VALIDATOR) {
+            return usersStakedValidatorsMap[Owner];
+        }
+    }
+
+    function removeStakedNodesByUserID(address nodes_owner)
+        internal
+        returns (bool)
+    {
+        address target_user;
+        if (ContractOwners[msg.sender] == true) {
+            target_user = nodes_owner;
+        } else {
+            target_user = msg.sender;
+        }
+        string memory node_id;
+
+        uint256 StakeNodeWorkersIndex = 0;
+        uint256 StakeMetadataStorageNodesIndex = 0;
+        uint256 StakeNodeValidatorsIndex = 0;
+
+        // remove target user's all Nodes
+        for (
+            uint256 i = 0;
+            i < usersStakedWorkersMap[target_user].length;
+            i++
+        ) {
+            node_id = usersStakedWorkersMap[target_user][i];
+            bytes32 node_id_ = keccak256(abi.encodePacked(node_id));
+            for (
+                uint256 j = StakeNodeWorkersIndex;
+                j < StakeNodeWorkers.length;
+                j++
+            ) {
+                if (
+                    keccak256(abi.encodePacked(StakeNodeWorkers[j])) ==
+                    node_id_
+                ) {
+                    Array.remove(StakeNodeWorkers, j);
+                    delete StakedWorkers[node_id];
+                    StakeNodeWorkersIndex = j;
+                    break;
+                }
+            }
+            for (
+                uint256 j = StakeMetadataStorageNodesIndex;
+                j < StakeMetadataStorageNodes.length;
+                j++
+            ) {
+                if (
+                    keccak256(
+                        abi.encodePacked(StakeMetadataStorageNodes[j])
+                    ) == node_id_
+                ) {
+                    Array.remove(StakeMetadataStorageNodes, j);
+                    delete StakedMetastorageNodes[node_id];
+                    StakeMetadataStorageNodesIndex = j;
+                    break;
+                }
+            }
+            for (
+                uint256 j = StakeNodeValidatorsIndex;
+                j < StakeNodeValidators.length;
+                j++
+            ) {
+                if (
+                    keccak256(abi.encodePacked(StakeNodeValidators[j])) ==
+                    node_id_
+                ) {
+                    Array.remove(StakeNodeValidators, j);
+                    delete StakedValidators[node_id];
+                    StakeNodeValidatorsIndex = j;
+                    break;
+                }
+            }
+            string memory nodePubkey = nodeIdPub[node_id];
+            delete pubkeyToWallet[nodePubkey];
+            delete nodeIdPub[node_id];
+        }
+        delete usersStakedWorkersMap[target_user];
+        delete usersStakedMetastorageNodesMap[target_user];
+        delete usersStakedValidatorsMap[target_user];
+        delete StakedAddress[target_user];
+
+        return true;
+    }
+
+    function GetStakeNodeWorkers() public view returns (string[] memory) {
+        return StakeNodeWorkers;
+    }
+
+    function GetStakeMetadataStorageNodes()
+        public
+        view
+        returns (string[] memory)
+    {
+        return StakeMetadataStorageNodes;
+    }
+
+    function GetStakeNodeValidators() public view returns (string[] memory) {
+        return StakeNodeValidators;
+    }
+
+    function GetStakeOtherNodes() public view returns (string[] memory) {
+        return StakeOtherNodes;
+    }
+}
